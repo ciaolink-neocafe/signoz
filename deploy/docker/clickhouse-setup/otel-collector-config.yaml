@@ -64,6 +64,49 @@ receivers:
 processors:
   logstransform/internal:
     operators:
+      # [logrus] parsing logrus data
+      - type: json_parser
+        if: '$ matches "^{.*}$"'
+        severity:
+          parse_from: attributes.level
+        output: clone_body_data
+
+      # [logrus] clone_body_data use to store all unhandle log fields
+      - id: clone_body_data
+        type: copy
+        from: body
+        to: attributes.rawlog
+        output: move_msg_body
+
+      # [logrus] move attributes.msg to body
+      - id: move_msg_body
+        type: move
+        if: '"msg" in attributes'
+        from: attributes["msg"]
+        to: body
+        output: remove_attrs_level
+      - id: remove_attrs_level
+        type: remove
+        if: '"level" in attributes'
+        field: attributes.level
+        output: remove_attrs_time
+      - id: remove_attrs_time
+        type: remove
+        if: '"time" in attributes'
+        field: attributes.time
+        output: trace_span_parsing
+
+      # [logrus] parsing trace_id & span_id
+      - id: trace_span_parsing
+        type: trace_parser
+        if: '"trace_id" in attributes or "span_id" in attributes'
+        trace_id:
+          parse_from: attributes.trace_id
+        span_id:
+          parse_from: attributes.span_id
+        output: remove_trace_id
+
+      # Default parser for trace_id and span_id
       - type: trace_parser
         if: '"trace_id" in attributes or "span_id" in attributes'
         trace_id:
