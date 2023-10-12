@@ -5,7 +5,9 @@ import loginApi from 'api/user/login';
 import signUpApi from 'api/user/signup';
 import afterLogin from 'AppRoutes/utils';
 import WelcomeLeftContainer from 'components/WelcomeLeftContainer';
+import { FeatureKeys } from 'constants/features';
 import ROUTES from 'constants/routes';
+import useFeatureFlag from 'hooks/useFeatureFlag';
 import { useNotifications } from 'hooks/useNotifications';
 import history from 'lib/history';
 import { useEffect, useState } from 'react';
@@ -15,6 +17,7 @@ import { useLocation } from 'react-router-dom';
 import { SuccessResponse } from 'types/api';
 import { PayloadProps } from 'types/api/user/getUser';
 import { PayloadProps as LoginPrecheckPayloadProps } from 'types/api/user/loginPrecheck';
+import { trackEvent } from 'utils/segmentAnalytics';
 
 import {
 	ButtonContainer,
@@ -57,6 +60,8 @@ function SignUp({ version }: SignUpProps): JSX.Element {
 	const token = params.get('token');
 	const [isDetailsDisable, setIsDetailsDisable] = useState<boolean>(false);
 
+	const isOnboardingEnabled = useFeatureFlag(FeatureKeys.ONBOARDING)?.active;
+
 	const getInviteDetailsResponse = useQuery({
 		queryFn: () =>
 			getInviteDetails({
@@ -80,6 +85,13 @@ function SignUp({ version }: SignUpProps): JSX.Element {
 			form.setFieldValue('email', responseDetails.email);
 			form.setFieldValue('organizationName', responseDetails.organization);
 			setIsDetailsDisable(true);
+
+			trackEvent('Account Creation Page Visited', {
+				email: responseDetails.email,
+				name: responseDetails.name,
+				company_name: responseDetails.organization,
+				source: 'SigNoz Cloud',
+			});
 		}
 	}, [
 		getInviteDetailsResponse.data?.payload,
@@ -226,6 +238,10 @@ function SignUp({ version }: SignUpProps): JSX.Element {
 				setLoading(true);
 
 				if (!isPasswordValid(values.password)) {
+					trackEvent('Account Creation Page - Invalid Password', {
+						email: values.email,
+						name: values.firstName,
+					});
 					setIsPasswordPolicyError(true);
 					setLoading(false);
 					return;
@@ -234,10 +250,19 @@ function SignUp({ version }: SignUpProps): JSX.Element {
 				if (isPreferenceVisible) {
 					await commonHandler(values, onAdminAfterLogin);
 				} else {
+					trackEvent('Account Created Successfully', {
+						email: values.email,
+						name: values.firstName,
+					});
+
 					await commonHandler(
 						values,
 						async (): Promise<void> => {
-							history.push(ROUTES.APPLICATION);
+							if (isOnboardingEnabled) {
+								history.push(ROUTES.GET_STARTED);
+							} else {
+								history.push(ROUTES.APPLICATION);
+							}
 						},
 					);
 				}

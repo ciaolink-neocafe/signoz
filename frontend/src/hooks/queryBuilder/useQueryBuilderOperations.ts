@@ -1,16 +1,21 @@
 import {
 	initialAutocompleteData,
 	initialQueryBuilderFormValuesMap,
-	mapOfFilters,
+	mapOfFormulaToFilters,
+	mapOfQueryFilters,
 	PANEL_TYPES,
 } from 'constants/queryBuilder';
 import { useQueryBuilder } from 'hooks/queryBuilder/useQueryBuilder';
 import { getOperatorsBySourceAndPanelType } from 'lib/newQueryBuilder/getOperatorsBySourceAndPanelType';
 import { findDataTypeOfOperator } from 'lib/query/findDataTypeOfOperator';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { BaseAutocompleteData } from 'types/api/queryBuilder/queryAutocompleteResponse';
-import { IBuilderQuery } from 'types/api/queryBuilder/queryBuilderData';
 import {
+	IBuilderFormula,
+	IBuilderQuery,
+} from 'types/api/queryBuilder/queryBuilderData';
+import {
+	HandleChangeFormulaData,
 	HandleChangeQueryData,
 	UseQueryOperations,
 } from 'types/common/operations.types';
@@ -21,54 +26,31 @@ export const useQueryOperations: UseQueryOperations = ({
 	query,
 	index,
 	filterConfigs,
+	formula,
 }) => {
 	const {
 		handleSetQueryData,
+		handleSetFormulaData,
 		removeQueryBuilderEntityByIndex,
 		panelType,
 		initialDataSource,
 		currentQuery,
 	} = useQueryBuilder();
+
 	const [operators, setOperators] = useState<SelectOption<string, string>[]>([]);
-	const [listOfAdditionalFilters, setListOfAdditionalFilters] = useState<
-		string[]
-	>([]);
 
 	const { dataSource, aggregateOperator } = query;
 
-	const handleChangeOperator = useCallback(
-		(value: string): void => {
-			const aggregateDataType: BaseAutocompleteData['dataType'] =
-				query.aggregateAttribute.dataType;
-
-			const typeOfValue = findDataTypeOfOperator(value);
-			const shouldResetAggregateAttribute =
-				(aggregateDataType === 'string' || aggregateDataType === 'bool') &&
-				typeOfValue === 'number';
-
-			const newQuery: IBuilderQuery = {
-				...query,
-				aggregateOperator: value,
-				having: [],
-				limit: null,
-				...(shouldResetAggregateAttribute
-					? { aggregateAttribute: initialAutocompleteData }
-					: {}),
-			};
-
-			handleSetQueryData(index, newQuery);
-		},
-		[index, query, handleSetQueryData],
-	);
-
 	const getNewListOfAdditionalFilters = useCallback(
-		(dataSource: DataSource): string[] => {
+		(dataSource: DataSource, isQuery: boolean): string[] => {
 			const additionalFiltersKeys: (keyof Pick<
 				IBuilderQuery,
 				'orderBy' | 'limit' | 'having' | 'stepInterval'
 			>)[] = ['having', 'limit', 'orderBy', 'stepInterval'];
 
-			const result: string[] = mapOfFilters[dataSource].reduce<string[]>(
+			const mapsOfFilters = isQuery ? mapOfQueryFilters : mapOfFormulaToFilters;
+
+			const result: string[] = mapsOfFilters[dataSource]?.reduce<string[]>(
 				(acc, item) => {
 					if (
 						filterConfigs &&
@@ -89,6 +71,41 @@ export const useQueryOperations: UseQueryOperations = ({
 		},
 
 		[filterConfigs],
+	);
+
+	const [listOfAdditionalFilters, setListOfAdditionalFilters] = useState<
+		string[]
+	>(getNewListOfAdditionalFilters(dataSource, true));
+
+	const [
+		listOfAdditionalFormulaFilters,
+		setListOfAdditionalFormulaFilters,
+	] = useState<string[]>(getNewListOfAdditionalFilters(dataSource, false));
+
+	const handleChangeOperator = useCallback(
+		(value: string): void => {
+			const aggregateDataType: BaseAutocompleteData['dataType'] =
+				query.aggregateAttribute.dataType;
+
+			const typeOfValue = findDataTypeOfOperator(value);
+
+			const shouldResetAggregateAttribute =
+				(aggregateDataType === 'string' || aggregateDataType === 'bool') &&
+				typeOfValue === 'number';
+
+			const newQuery: IBuilderQuery = {
+				...query,
+				aggregateOperator: value,
+				having: [],
+				limit: null,
+				...(shouldResetAggregateAttribute
+					? { aggregateAttribute: initialAutocompleteData }
+					: {}),
+			};
+
+			handleSetQueryData(index, newQuery);
+		},
+		[index, query, handleSetQueryData],
 	);
 
 	const handleChangeAggregatorAttribute = useCallback(
@@ -148,13 +165,21 @@ export const useQueryOperations: UseQueryOperations = ({
 		[query, index, handleSetQueryData],
 	);
 
-	const isMetricsDataSource = useMemo(
-		() => query.dataSource === DataSource.METRICS,
-		[query.dataSource],
+	const handleChangeFormulaData: HandleChangeFormulaData = useCallback(
+		(key, value) => {
+			const newFormula: IBuilderFormula = {
+				...(formula || ({} as IBuilderFormula)),
+				[key]: value,
+			};
+
+			handleSetFormulaData(index, newFormula);
+		},
+		[formula, handleSetFormulaData, index],
 	);
-	const isTracePanelType = useMemo(() => panelType === PANEL_TYPES.TRACE, [
-		panelType,
-	]);
+
+	const isMetricsDataSource = query.dataSource === DataSource.METRICS;
+
+	const isTracePanelType = panelType === PANEL_TYPES.TRACE;
 
 	useEffect(() => {
 		if (initialDataSource && dataSource !== initialDataSource) return;
@@ -170,9 +195,15 @@ export const useQueryOperations: UseQueryOperations = ({
 	}, [dataSource, initialDataSource, panelType, operators]);
 
 	useEffect(() => {
-		const additionalFilters = getNewListOfAdditionalFilters(dataSource);
+		const additionalFilters = getNewListOfAdditionalFilters(dataSource, true);
 
 		setListOfAdditionalFilters(additionalFilters);
+	}, [dataSource, aggregateOperator, getNewListOfAdditionalFilters]);
+
+	useEffect(() => {
+		const additionalFilters = getNewListOfAdditionalFilters(dataSource, false);
+
+		setListOfAdditionalFormulaFilters(additionalFilters);
 	}, [dataSource, aggregateOperator, getNewListOfAdditionalFilters]);
 
 	return {
@@ -185,5 +216,7 @@ export const useQueryOperations: UseQueryOperations = ({
 		handleChangeDataSource,
 		handleDeleteQuery,
 		handleChangeQueryData,
+		listOfAdditionalFormulaFilters,
+		handleChangeFormulaData,
 	};
 };
